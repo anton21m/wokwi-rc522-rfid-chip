@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "author": "ashumeiko",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "wokwi-arduino-uno", "id": "uno", "top": 0.6, "left": -0.6, "attrs": {} },
+    { "type": "chip-rfid-rc522", "id": "chip1", "top": -123.78, "left": 379.2, "attrs": {} }
+  ],
+  "connections": [
+    [ "chip1:SCK", "uno:13", "orange", [ "h0" ] ],
+    [ "chip1:MOSI", "uno:11", "green", [ "h0" ] ],
+    [ "chip1:MISO", "uno:12", "blue", [ "h0" ] ],
+    [ "chip1:SDA", "uno:10", "cyan", [ "h0" ] ],
+    [ "uno:GND.2", "chip1:GND", "black", [ "v19.7", "h108.9", "v-240.6", "h0.6", "v-38.4" ] ],
+    [ "uno:3.3V", "chip1:VCC", "red", [ "v29.3", "h138", "v-278.4" ] ],
+    [ "chip1:RST", "uno:9", "violet", [ "h0" ] ]
+  ],
+  "dependencies": {}
+}
