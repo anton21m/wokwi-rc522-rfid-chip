@@ -21,4 +21,5 @@ arduino-cli compile --fqbn arduino:avr:uno MFRC522_chip_simulation.ino --output-
 
 # fast start
 1. Экспортировать готовый проект в папку src как есть
-2.
+2. отредактировать названия в makefile и wokwi.toml
+3. Вывод custom чипов в vscode отображается на вкладке `Output -> Wokwi chips`

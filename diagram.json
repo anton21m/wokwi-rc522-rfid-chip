@@ -1,20 +1,18 @@
 {
   "version": 1,
-  "author": "Danang S",
+  "author": "Uri Shaked",
   "editor": "wokwi",
   "parts": [
-    { "type": "wokwi-arduino-uno", "id": "uno", "top": 0, "left": 0, "attrs": {} },
-    { "type": "chip-rfid-rc522", "id": "chip1", "top": -75.78, "left": 302.4, "attrs": {} }
+    { "type": "wokwi-arduino-uno", "id": "uno", "top": 10.2, "left": 37.8, "attrs": {} },
+    { "type": "chip-spi-example", "id": "chip1", "top": -75.78, "left": 196.8, "attrs": {} }
   ],
   "connections": [
-    [ "chip1:SCK", "uno:13", "orange", [ "h0" ] ],
-    [ "chip1:MOSI", "uno:11", "green", [ "h0" ] ],
-    [ "chip1:MISO", "uno:12", "blue", [ "h0" ] ],
-    [ "chip1:SDA", "uno:10", "green", [ "h0" ] ],
-    [ "uno:3.3V", "chip1:VCC", "red", [ "v-143.5", "h138", "v-48" ] ],
+    [ "chip1:GND", "uno:GND.2", "black", [ "v0", "h49.81", "v259.2", "h-124.8" ] ],
+    [ "chip1:VCC", "uno:5V", "red", [ "h59.41", "v278.4", "h-134.4" ] ],
+    [ "chip1:SCK", "uno:13", "gold", [ "h0" ] ],
     [ "chip1:RST", "uno:9", "green", [ "h-144", "v0", "v28.2" ] ],
-    [ "uno:GND.1", "chip1:GND", "black", [ "v0" ] ]
-  ],
-  "dependencies": {},
-  "serialMonitor": { "display": "always", "newline": "lf" }
+    [ "chip1:CS", "uno:10", "orange", [ "h0" ] ],
+    [ "uno:12", "chip1:MISO", "blue", [ "v0" ] ],
+    [ "chip1:MOSI", "uno:11", "violet", [ "h0" ] ]
+  ]
 }

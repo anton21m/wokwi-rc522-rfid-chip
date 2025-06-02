@@ -1,14 +1,14 @@
 {
-  "name": "RFID-RC522",
-  "author": "arducoding",
+  "name": "RC522 RFID Reader",
+  "author": "Uri Shaked",
   "pins": [
-    "SDA",
+    "CS",
     "SCK",
     "MOSI",
     "MISO",
-    " ",
-    "RST",
+    "IRQ",    
     "GND",
+    "RST",
     "VCC",
     "",
     "",
@@ -16,7 +16,7 @@
     "",
     "",
     "",
+    "",
     ""
-  ],
-  "controls": []
+  ]
 }

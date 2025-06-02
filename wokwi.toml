@@ -4,5 +4,5 @@ firmware = 'build/sketch.ino.hex'
 elf = 'build/sketch.ino.hex.elf'
 
 [[chip]]
-name = 'rfid-rc522'
-binary = 'build/rfid-rc522.wasm'
+name = 'spi-example'
+binary = 'build/spi-example.wasm'

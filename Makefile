@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 
 SOURCE_DIR := src
-SOURCE_CHIP_NAME := rfid-rc522
-SOURCE_PROJECT := $(SOURCE_DIR)/sketch.ino
+SOURCE_CHIP_NAME := spi-example
+SOURCE_PROJECT := $(SOURCE_DIR)/spi-chip-example.ino
 
 clean:
 	echo "Cleaning up..."
@@ -12,6 +12,7 @@ clean:
 	chmod -R 777 build
 
 compile-chip:
+	cp $(SOURCE_DIR)/diagram.json diagram.json
 	echo "Prepared to compile chip..."
 	mkdir -p build/chip
 	cp "$(SOURCE_DIR)/$(SOURCE_CHIP_NAME).chip.json" build/$(SOURCE_CHIP_NAME).json
