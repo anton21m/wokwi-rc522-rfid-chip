@@ -1,5 +1,5 @@
 {
-  "name": "RFID-RC522",
+  "name": "rfid-rc522",
   "author": "arducoding",
   "pins": [
     "SDA",

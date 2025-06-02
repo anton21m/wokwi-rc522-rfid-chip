@@ -1,0 +1,8 @@
+[wokwi]
+version = 1
+firmware = 'build/MFRC522_chip_simulation.ino.hex'
+elf = 'build/MFRC522_chip_simulation.ino.elf'
+
+[[chip]]
+name = 'rfid-rc522'
+binary = 'build/chip.wasm'
