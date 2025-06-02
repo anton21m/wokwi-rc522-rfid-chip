@@ -86,7 +86,7 @@ void chip_init(void) {
   };
   chip->spi = spi_init(&spi_cfg);
 
-  printf("[chip-rfid-rc522] Emulation initialized, UID %02X %02X %02X %02X\n",
+  printf("Emulation initialized, UID %02X %02X %02X %02X\n",
     chip->uid[0], chip->uid[1], chip->uid[2], chip->uid[3]);
 }
 
@@ -94,7 +94,7 @@ void chip_init(void) {
 void chip_pin_change(void *user_data, pin_t pin, uint32_t value) {
   chip_state_t *chip = (chip_state_t *)user_data;
   if (pin == chip->cs_pin) {
-    printf("[chip-rfid-rc522] CS pin changed: %s\n", value == LOW ? "LOW" : "HIGH");
+    printf("CS pin changed: %s\n", value == LOW ? "LOW" : "HIGH");
     if (value == LOW) {
       printf("SPI chip selected\n");
       chip->spi_state = 0;
@@ -116,7 +116,7 @@ static void process_mifare_command(chip_state_t *chip);
 void chip_spi_done(void *user_data, uint8_t *buffer, uint32_t count) {
   chip_state_t *chip = (chip_state_t *)user_data;
 
-  printf("[chip-rfid-rc522] SPI buffer received (count %d):", count);
+  printf("SPI buffer received (count %d):", count);
   for (uint32_t i=0; i<count; i++) {
       printf(" %02X", buffer[i]);
   }
@@ -125,7 +125,7 @@ void chip_spi_done(void *user_data, uint8_t *buffer, uint32_t count) {
   if (chip->spi_state == 0) {
     uint8_t cmd = buffer[0];
 
-    printf("[chip-rfid-rc522] SPI cmd received: 0x%02X\n", cmd);
+    printf("SPI cmd received: 0x%02X\n", cmd);
 
     chip->current_address = (cmd >> 1) & 0x3F;
     chip->is_read = (cmd & 0x80) != 0;
@@ -137,11 +137,11 @@ void chip_spi_done(void *user_data, uint8_t *buffer, uint32_t count) {
         val = 0x92; // Version reg fixed value
       }
       chip->spi_buffer[0] = val;
-      printf("[chip-rfid-rc522] READ reg 0x%02X = 0x%02X\n", chip->current_address, val);
+      printf("READ reg 0x%02X = 0x%02X\n", chip->current_address, val);
     } else {
       // For write commands, reply with dummy byte
       chip->spi_buffer[0] = 0;
-      printf("[chip-rfid-rc522] WRITE to reg 0x%02X\n", chip->current_address);
+      printf("WRITE to reg 0x%02X\n", chip->current_address);
     }
 
     chip->spi_state = 1;
@@ -154,16 +154,16 @@ void chip_spi_done(void *user_data, uint8_t *buffer, uint32_t count) {
       if (reg == 0x09) { // FIFODataReg
         if (chip->fifo_len < FIFO_SIZE) {
           chip->fifo[chip->fifo_len++] = val;
-          printf("[chip-rfid-rc522] FIFO push: 0x%02X (len %d)\n", val, chip->fifo_len);
+          printf("FIFO push: 0x%02X (len %d)\n", val, chip->fifo_len);
         }
       } else if (reg == 0x01) { // CommandReg
-        printf("[chip-rfid-rc522] CommandReg write: 0x%02X\n", val);
+        printf("CommandReg write: 0x%02X\n", val);
         if (val == 0x0E) { // Soft reset
           chip->fifo_len = 0;
           chip->authenticated = false;
           chip->card_selected = false;
           chip->anticoll_step = 0;
-          printf("[chip-rfid-rc522] Soft reset\n");
+          printf("Soft reset\n");
         } else if (val == 0x0C) { // Transceive command
           // Process the command in FIFO
           process_mifare_command(chip);
@@ -187,7 +187,7 @@ void chip_spi_done(void *user_data, uint8_t *buffer, uint32_t count) {
 void process_mifare_command(chip_state_t *chip) {
   if (chip->fifo_len == 0) return;
 
-  printf("[chip-rfid-rc522] process_mifare_command: fifo_len=%d, fifo=", chip->fifo_len);
+  printf("process_mifare_command: fifo_len=%d, fifo=", chip->fifo_len);
   for(int i=0; i < chip->fifo_len; i++) {
       printf("%02X ", chip->fifo[i]);
   }
@@ -197,13 +197,13 @@ void process_mifare_command(chip_state_t *chip) {
 
   switch (cmd) {
     case REG_VERSION:
-      printf("[chip-rfid-rc522] REG_VERSION detected\n");
+      printf("REG_VERSION detected\n");
       break;
 
     case CMD_REQA:
       // Ответ на REQA — 0x04 0x00 (ATQA)
       chip->spi_buffer[0] = 0x04;
-      printf("[chip-rfid-rc522] REQA detected, sending ATQA\n");
+      printf("REQA detected, sending ATQA\n");
       break;
 
       case CMD_ANTICOLL:
@@ -215,17 +215,17 @@ void process_mifare_command(chip_state_t *chip) {
             bcc ^= chip->uid[i];
           }
           chip->spi_buffer[4] = bcc;
-          printf("[chip-rfid-rc522] ANTICOLL, sending UID\n");
+          printf("ANTICOLL, sending UID\n");
         } else if (chip->fifo_len >= 9 && chip->fifo[1] == 0x70) {
           chip->card_selected = true;
-          printf("[chip-rfid-rc522] SELECT command received\n");
+          printf("SELECT command received\n");
         }
         break;
     
     case CMD_AUTH_A:
     case CMD_AUTH_B:
       chip->authenticated = true; // Упрощение: всегда аутентифицировано
-      printf("[chip-rfid-rc522] AUTH command received, authenticated\n");
+      printf("AUTH command received, authenticated\n");
       break;
 
     case CMD_READ:
@@ -233,7 +233,7 @@ void process_mifare_command(chip_state_t *chip) {
         uint8_t block = chip->fifo[1];
         if (block < (16*4)) {
           memcpy(chip->spi_buffer, &chip->card_data[block * 16], 16);
-          printf("[chip-rfid-rc522] READ block %d\n", block);
+          printf("READ block %d\n", block);
         }
       }
       break;
@@ -243,13 +243,13 @@ void process_mifare_command(chip_state_t *chip) {
         uint8_t block = chip->fifo[1];
         // Ожидаем, что дальше придут 16 байт данных
         // Для простоты опустим реализацию по частям
-        printf("[chip-rfid-rc522] WRITE command block %d (data not implemented)\n", block);
+        printf("WRITE command block %d (data not implemented)\n", block);
       }
       break;
 
     default:
       
-      printf("[chip-rfid-rc522] Unknown MIFARE command 0x%02X\n", cmd);
+      printf("Unknown MIFARE command 0x%02X\n", cmd);
       break;
   }
 }
