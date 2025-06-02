@@ -18,7 +18,7 @@ RUN mkdir -p /usr/lib/llvm17/lib/clang/17/lib/wasi/ && \
 
 RUN mkdir /src && chown nobody /src
 USER nobody
-COPY --chown=nobody:nobody /src/ /src/
+COPY --chown=nobody:nobody /build/chip /src/
 WORKDIR /src
 # RUN clang --target=wasm32-unknown-wasi --sysroot /opt/wasi-libc -nostartfiles -Wl,--no-entry -Wl,--export-all -o /tmp/chip.wasm /src/main.c
 RUN clang --target=wasm32-unknown-wasi --sysroot /opt/wasi-libc -nostartfiles -Wl,--import-memory -Wl,--export-table  \

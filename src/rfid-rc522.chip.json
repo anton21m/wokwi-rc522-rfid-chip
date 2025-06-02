@@ -1,14 +1,14 @@
 {
-  "name": "rfid-rc522",
+  "name": "RFID-RC522",
   "author": "arducoding",
   "pins": [
     "SDA",
     "SCK",
     "MOSI",
     "MISO",
-    "IRQ",
-    "GND",
+    " ",
     "RST",
+    "GND",
     "VCC",
     "",
     "",
@@ -18,7 +18,5 @@
     "",
     ""
   ],
-  "controls": [
-    
-  ]
+  "controls": []
 }

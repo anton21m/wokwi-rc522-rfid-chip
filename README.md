@@ -18,3 +18,7 @@ export WOKWI_CLI_TOKEN=wok_aK1EaHWh9Mjwde13VdjgmAftfXAU2G3Hcd2c595d
 ```
 arduino-cli compile --fqbn arduino:avr:uno MFRC522_chip_simulation.ino --output-dir build
 ```
+
+# fast start
+1. Экспортировать готовый проект в папку src как есть
+2.
