@@ -63,9 +63,6 @@ void chip_init(void) {
   chip->uid[2] = 0xBE;
   chip->uid[3] = 0xEF;
 
-  // Initialize card data with zeros (or some pattern)
-  memset(chip->card_data, 0, sizeof(chip->card_data));
-
   // Example: put UID in sector 0 block 0 (manufacturer block)
   memcpy(&chip->card_data[0], chip->uid, 4);
 
@@ -102,8 +99,7 @@ void chip_pin_change(void *user_data, pin_t pin, uint32_t value) {
     } else {
       printf("SPI chip deselected\n");
       spi_stop(chip->spi);
-      // Reset state on CS high
-      chip->fifo_len = 0;
+      // Не сбрасывайте chip->fifo_len здесь!
       chip->authenticated = false;
       chip->card_selected = false;
       chip->anticoll_step = 0;
@@ -167,6 +163,7 @@ void chip_spi_done(void *user_data, uint8_t *buffer, uint32_t count) {
         } else if (val == 0x0C) { // Transceive command
           // Process the command in FIFO
           process_mifare_command(chip);
+          // Сброс FIFO только после обработки!
           chip->fifo_len = 0;
         }
       } else {
@@ -185,38 +182,35 @@ void chip_spi_done(void *user_data, uint8_t *buffer, uint32_t count) {
 
 
 void process_mifare_command(chip_state_t *chip) {
-  if (chip->fifo_len == 0) return;
-
   printf("process_mifare_command: fifo_len=%d, fifo=", chip->fifo_len);
   for(int i=0; i < chip->fifo_len; i++) {
       printf("%02X ", chip->fifo[i]);
   }
   printf("\n");
 
+  if (chip->fifo_len == 0) return;
+
   uint8_t cmd = chip->fifo[0];
 
   switch (cmd) {
-    case REG_VERSION:
-      printf("REG_VERSION detected\n");
-      break;
-
     case CMD_REQA:
       // Ответ на REQA — 0x04 0x00 (ATQA)
       chip->spi_buffer[0] = 0x04;
+      chip->spi_buffer[1] = 0x00;
       printf("REQA detected, sending ATQA\n");
       break;
 
       case CMD_ANTICOLL:
-        if (chip->fifo_len == 2 && chip->fifo[1] == 0x20) {
-          // Anticollision
-          uint8_t bcc = 0;
-          for (int i = 0; i < 4; i++) {
-            chip->spi_buffer[i] = chip->uid[i];
-            bcc ^= chip->uid[i];
-          }
-          chip->spi_buffer[4] = bcc;
-          printf("ANTICOLL, sending UID\n");
-        } else if (chip->fifo_len >= 9 && chip->fifo[1] == 0x70) {
+      if (chip->fifo_len == 2 && chip->fifo[1] == 0x20) {
+        // Anticollision
+        uint8_t bcc = 0;
+        for (int i = 0; i < 4; i++) {
+          chip->spi_buffer[i] = chip->uid[i];
+          bcc ^= chip->uid[i];
+        }
+        chip->spi_buffer[4] = bcc;
+        printf("ANTICOLL, sending UID\n");
+      } else if (chip->fifo_len >= 9 && chip->fifo[1] == 0x70) {
           chip->card_selected = true;
           printf("SELECT command received\n");
         }
