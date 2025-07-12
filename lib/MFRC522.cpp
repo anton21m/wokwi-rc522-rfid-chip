@@ -131,11 +131,10 @@ void process_mifare_command(chip_state_t *chip) {
       chip->registers[0x04] |= 0x01;  // Set IRQ
       chip->registers[0x0A] = chip->fifo_len;
       chip->anticoll_step = 0;
-      bytes_to_process = 1;  // Обрабатываем только REQA байт
       return;
 
     case CMD_ANTICOLL:
-      if (chip->anticoll_step == 0 && chip->fifo_len == 2 && chip->fifo[0] == 0x93 && chip->fifo[1] == 0x20) {
+      if (chip->anticoll_step == 0 && chip->fifo_len == 2 && chip->fifo[0] == 0x93 && (chip->fifo[1] == 0x20 || chip->fifo[1] == 0x26)) {
         printf("ANTICOLL - sending UID and BCC\n");
         chip->fifo[0] = chip->uid[0];
         chip->fifo[1] = chip->uid[1];
@@ -150,10 +149,6 @@ void process_mifare_command(chip_state_t *chip) {
         bytes_to_process = 2;
         printf("ANTICOLL processed - UID and BCC in FIFO: %02X %02X %02X %02X %02X\n",
                chip->fifo[0], chip->fifo[1], chip->fifo[2], chip->fifo[3], chip->fifo[4]);
-      } else if (chip->anticoll_step == 0 && chip->fifo_len == 1 && chip->fifo[0] == 0x93) {
-        // Ждем второй байт ANTICOLL
-        printf("ANTICOLL - waiting for second byte\n");
-        return;
       } else if (chip->anticoll_step == 1 && chip->fifo_len >= 9 && chip->fifo[0] == 0x93 && chip->fifo[1] == 0x94) {
         uint8_t received_uid[4] = {chip->fifo[2], chip->fifo[3], chip->fifo[4], chip->fifo[5]};
         uint8_t received_bcc = chip->fifo[6];
@@ -259,33 +254,10 @@ void chip_spi_done(void *user_data, uint8_t *buffer, uint32_t count) {
 
       if (reg == 0x09) {
         if (chip->fifo_len < FIFO_SIZE) {
-          // Принимаем команды REQA, ANTICOLL и SELECT в FIFO
-          if (val == 0x26) {
-            // REQA command
-            chip->fifo[chip->fifo_len] = val;
-            chip->fifo_len++;
-            chip->registers[0x0A] = chip->fifo_len;
-            printf("FIFO push: 0x%02X (len %d) - REQA command\n", val, chip->fifo_len);
-          } else if (val == 0x93) {
-            chip->fifo[chip->fifo_len] = val;
-            chip->fifo_len++;
-            chip->registers[0x0A] = chip->fifo_len;
-            printf("FIFO push: 0x%02X (len %d) - ANTICOLL/SELECT first byte\n", val, chip->fifo_len);
-          } else if (val == 0x20 || val == 0x94) {
-            // Второй байт для ANTICOLL или SELECT
-            chip->fifo[chip->fifo_len] = val;
-            chip->fifo_len++;
-            chip->registers[0x0A] = chip->fifo_len;
-            printf("FIFO push: 0x%02X (len %d) - ANTICOLL/SELECT second byte\n", val, chip->fifo_len);
-          } else if (chip->fifo_len >= 2 && chip->fifo[0] == 0x93) {
-            // Дополнительные байты для SELECT (UID + BCC + CRC)
-            chip->fifo[chip->fifo_len] = val;
-            chip->fifo_len++;
-            chip->registers[0x0A] = chip->fifo_len;
-            printf("FIFO push: 0x%02X (len %d) - SELECT data byte\n", val, chip->fifo_len);
-          } else {
-            printf("FIFO ignore: 0x%02X (not a valid command byte)\n", val);
-          }
+          chip->fifo[chip->fifo_len] = val;
+          chip->fifo_len++;
+          chip->registers[0x0A] = chip->fifo_len;
+          printf("FIFO push: 0x%02X (len %d)\n", val, chip->fifo_len);
         }
       } else if (reg == 0x01) {
         printf("CommandReg = 0x%02X\n", val);
