@@ -30,7 +30,8 @@ compile-arduino:
 	mkdir -p ./build/sketch
 	echo "Compiling Arduino sketch..."
 	cp "$(SOURCE_PROJECT)" ./build/sketch/sketch.ino
-	arduino-cli compile --fqbn arduino:avr:uno ./build/sketch --output-dir build
+	# arduino-cli lib uninstall MFRC522
+	arduino-cli compile --fqbn arduino:avr:uno ./build/sketch --library ./lib/MFRC522 --output-dir build
 
 
 all: clean compile-chip compile-arduino
