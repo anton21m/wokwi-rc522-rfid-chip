@@ -1077,10 +1077,14 @@ MFRC522::StatusCode MFRC522::MIFARE_Write(	byte blockAddr, ///< MIFARE Classic: 
 											byte *buffer,	///< The 16 bytes to write to the PICC
 											byte bufferSize	///< Buffer size, must be at least 16 bytes. Exactly 16 bytes are written.
 										) {
+	Serial.println(F("DEBUG: MIFARE_Write START"));
+	Serial.print(F("DEBUG:   blockAddr=0x")); Serial.println(blockAddr, HEX);
+	Serial.print(F("DEBUG:   bufferSize=")); Serial.println(bufferSize);
 	MFRC522::StatusCode result;
 	
 	// Sanity check
 	if (buffer == nullptr || bufferSize < 16) {
+		Serial.println(F("DEBUG: MIFARE_Write: Invalid buffer or size"));
 		return STATUS_INVALID;
 	}
 	
@@ -1089,17 +1093,24 @@ MFRC522::StatusCode MFRC522::MIFARE_Write(	byte blockAddr, ///< MIFARE Classic: 
 	byte cmdBuffer[2];
 	cmdBuffer[0] = PICC_CMD_MF_WRITE;
 	cmdBuffer[1] = blockAddr;
+	Serial.println(F("DEBUG: MIFARE_Write: Phase 1 - Sending WRITE command (0xA0)"));
 	result = PCD_MIFARE_Transceive(cmdBuffer, 2); // Adds CRC_A and checks that the response is MF_ACK.
 	if (result != STATUS_OK) {
+		Serial.print(F("DEBUG: MIFARE_Write: Phase 1 failed: ")); Serial.println(GetStatusCodeName(result));
 		return result;
 	}
+	Serial.println(F("DEBUG: MIFARE_Write: Phase 1 successful (ACK received)"));
 	
 	// Step 2: Transfer the data
+	Serial.println(F("DEBUG: MIFARE_Write: Phase 2 - Sending 16 bytes data"));
 	result = PCD_MIFARE_Transceive(buffer, bufferSize); // Adds CRC_A and checks that the response is MF_ACK.
 	if (result != STATUS_OK) {
+		Serial.print(F("DEBUG: MIFARE_Write: Phase 2 failed: ")); Serial.println(GetStatusCodeName(result));
 		return result;
 	}
+	Serial.println(F("DEBUG: MIFARE_Write: Phase 2 successful (ACK received)"));
 	
+	Serial.println(F("DEBUG: MIFARE_Write END (Success)"));
 	return STATUS_OK;
 } // End MIFARE_Write()
 
@@ -1344,11 +1355,14 @@ MFRC522::StatusCode MFRC522::PCD_MIFARE_Transceive(	byte *sendData,		///< Pointe
 													byte sendLen,		///< Number of bytes in sendData.
 													bool acceptTimeout	///< True => A timeout is also success
 												) {
+	Serial.println(F("DEBUG: PCD_MIFARE_Transceive START"));
+	Serial.print(F("DEBUG:   sendLen=")); Serial.println(sendLen);
 	MFRC522::StatusCode result;
 	byte cmdBuffer[18]; // We need room for 16 bytes data and 2 bytes CRC_A.
 	
 	// Sanity check
 	if (sendData == nullptr || sendLen > 16) {
+		Serial.println(F("DEBUG: PCD_MIFARE_Transceive: Invalid buffer or sendLen"));
 		return STATUS_INVALID;
 	}
 	
@@ -1356,28 +1370,52 @@ MFRC522::StatusCode MFRC522::PCD_MIFARE_Transceive(	byte *sendData,		///< Pointe
 	memcpy(cmdBuffer, sendData, sendLen);
 	result = PCD_CalculateCRC(cmdBuffer, sendLen, &cmdBuffer[sendLen]);
 	if (result != STATUS_OK) { 
+		Serial.print(F("DEBUG: PCD_MIFARE_Transceive: CRC calculation failed: ")); Serial.println(GetStatusCodeName(result));
 		return result;
 	}
 	sendLen += 2;
+	Serial.print(F("DEBUG: PCD_MIFARE_Transceive: Data with CRC, total sendLen=")); Serial.println(sendLen);
+	Serial.print(F("DEBUG: Data to send: "));
+	for (int i = 0; i < sendLen; i++) {
+		Serial.print(cmdBuffer[i], HEX); Serial.print(" ");
+	}
+	Serial.println();
 	
 	// Transceive the data, store the reply in cmdBuffer[]
 	byte waitIRq = 0x30;		// RxIRq and IdleIRq
-	byte cmdBufferSize = sizeof(cmdBuffer);
+	byte cmdBufferSize = sizeof(cmdBuffer); // This should be the max size of the buffer passed to PCD_CommunicateWithPICC
 	byte validBits = 0;
+	Serial.println(F("DEBUG: PCD_MIFARE_Transceive: Calling PCD_CommunicateWithPICC"));
 	result = PCD_CommunicateWithPICC(PCD_Transceive, waitIRq, cmdBuffer, sendLen, cmdBuffer, &cmdBufferSize, &validBits);
+	Serial.print(F("DEBUG: PCD_MIFARE_Transceive: PCD_CommunicateWithPICC returned: ")); Serial.println(GetStatusCodeName(result));
+
 	if (acceptTimeout && result == STATUS_TIMEOUT) {
+		Serial.println(F("DEBUG: PCD_MIFARE_Transceive: Accepted timeout as success."));
+		Serial.println(F("DEBUG: PCD_MIFARE_Transceive END (Accepted Timeout)"));
 		return STATUS_OK;
 	}
 	if (result != STATUS_OK) {
+		Serial.println(F("DEBUG: PCD_MIFARE_Transceive END (Failure from CommunicateWithPICC)"));
 		return result;
 	}
 	// The PICC must reply with a 4 bit ACK
+	Serial.print(F("DEBUG: PCD_MIFARE_Transceive: Response cmdBufferSize=")); Serial.print(cmdBufferSize);
+	Serial.print(F(", validBits=")); Serial.println(validBits);
+	Serial.print(F("DEBUG: Received data: "));
+	for (int i = 0; i < cmdBufferSize; i++) {
+		Serial.print(cmdBuffer[i], HEX); Serial.print(" ");
+	}
+	Serial.println();
+
 	if (cmdBufferSize != 1 || validBits != 4) {
+		Serial.println(F("DEBUG: PCD_MIFARE_Transceive: Bad response size or valid bits (Expected 1 byte, 4 valid bits)"));
 		return STATUS_ERROR;
 	}
 	if (cmdBuffer[0] != MF_ACK) {
+		Serial.print(F("DEBUG: PCD_MIFARE_Transceive: NACK received: 0x")); Serial.println(cmdBuffer[0], HEX);
 		return STATUS_MIFARE_NACK;
 	}
+	Serial.println(F("DEBUG: PCD_MIFARE_Transceive END (Success ACK)"));
 	return STATUS_OK;
 } // End PCD_MIFARE_Transceive()
 

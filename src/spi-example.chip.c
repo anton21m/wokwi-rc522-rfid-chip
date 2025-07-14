@@ -22,6 +22,14 @@
 #define CMD_WRITE 0xA0
 #define REG_VERSION 0x92
 
+// Добавьте недостающие:
+#define CMD_CALC_CRC      0x03
+#define CMD_IDLE          0x00
+#define CMD_MEM           0x01
+#define CMD_GEN_RANDOM_ID 0x02
+#define CMD_TRANSMIT      0x04
+#define CMD_RECEIVE       0x08
+
 typedef enum {
   SPI_STATE_IDLE,
   SPI_STATE_WAIT_DATA,
@@ -61,6 +69,10 @@ typedef struct {
 
   // Streaming write state: true while CS is low and we are writing consecutive bytes into FIFO
   bool stream_write_to_fifo;
+
+  // Backdoor variables
+  bool uid_backdoor_step1;
+  bool uid_backdoor_open;
 } chip_state_t;
 
 // Forward declarations
@@ -143,8 +155,32 @@ void chip_init(void) {
   printf("INIT, UID %02X %02X %02X %02X\n",
     chip->uid[0], chip->uid[1], chip->uid[2], chip->uid[3]);
 
-  // Example: put UID in sector 0 block 0 (manufacturer block)
-  memcpy(&chip->card_data[0], chip->uid, 4);
+  // Initialize card data with default MIFARE Classic 1K structure
+  memset(chip->card_data, 0, sizeof(chip->card_data));
+
+  // Populate Block 0 (Manufacturer Block) with UID and BCC
+  chip->card_data[0] = chip->uid[0];
+  chip->card_data[1] = chip->uid[1];
+  chip->card_data[2] = chip->uid[2];
+  chip->card_data[3] = chip->uid[3];
+  chip->card_data[4] = chip->uid[0] ^ chip->uid[1] ^ chip->uid[2] ^ chip->uid[3]; // BCC
+  // The rest of block 0 is manufacturer data, can be left as 0.
+
+  // Populate all sector trailers with default keys and access bits.
+  // This mimics a fresh MIFARE Classic card.
+  const uint8_t default_trailer[16] = {
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // Key A
+    0xFF, 0x07, 0x80,                   // Access Bits (default configuration)
+    0x69,                               // User Data Byte (GPB)
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF  // Key B
+  };
+
+  // MIFARE Classic 1K has 16 sectors.
+  for (int sector = 0; sector < 16; sector++) {
+    // The trailer is the last block of the sector (block 3).
+    int trailer_block_index = sector * 4 + 3;
+    memcpy(&chip->card_data[trailer_block_index * 16], default_trailer, 16);
+  }
 
   // Setup pin watching and SPI
   pin_watch_config_t watch_cfg = {
@@ -329,6 +365,190 @@ void process_mifare_command(chip_state_t *chip) {
       }
       break;
 
+    case CMD_READ:
+      printf("Handling READ command (block 0x%02X)\n", chip->fifo[1]);
+      if (chip->authenticated) {
+        if (chip->fifo_len >= 2) {
+          uint8_t blockAddr = chip->fifo[1];
+          if (blockAddr < 64) { // 16 sectors * 4 blocks/sector
+            printf("Reading block %d\n", blockAddr);
+            // Copy 16 bytes from emulated card memory
+            memcpy(chip->fifo, &chip->card_data[blockAddr * 16], 16);
+            
+            // Append CRC
+            uint8_t crc[2];
+            calc_crc_a(chip->fifo, 16, crc);
+            chip->fifo[16] = crc[0];
+            chip->fifo[17] = crc[1];
+            chip->fifo_len = 18;
+            update_fifo_level_register(chip);
+            set_specific_irq_flag(chip, 0x04); // RxIRq
+            printf("Block %d data plus CRC is in FIFO.\n", blockAddr);
+          } else {
+            printf("READ failed: block address %d is out of bounds.\n", blockAddr);
+            chip->fifo_len = 0;
+            update_fifo_level_register(chip);
+          }
+        } else {
+            printf("READ failed: command too short.\n");
+            chip->fifo_len = 0;
+            update_fifo_level_register(chip);
+        }
+      } else {
+        printf("READ failed: not authenticated for this sector.\n");
+        // Don't respond, let it time out.
+        chip->fifo_len = 0;
+        update_fifo_level_register(chip);
+      }
+      break;
+
+    case CMD_WRITE:
+      printf("Handling WRITE command (block 0x%02X)\n", chip->fifo[1]);
+      uint8_t blockAddr = chip->fifo[1];
+      bool allow_write = false;
+      if (chip->authenticated) {
+        allow_write = true;
+      }
+      // Разрешить запись в блок 0, если открыт backdoor
+      if (blockAddr == 0 && chip->uid_backdoor_open) {
+        allow_write = true;
+        printf("Backdoor open: allowing write to block 0 without authentication!\n");
+        chip->uid_backdoor_open = false; // Сбросить после успешной записи
+      }
+      if (allow_write) {
+        if (chip->fifo_len >= 2) {
+          if (blockAddr < 64) {
+            printf("Writing block %d\n", blockAddr);
+            memcpy(&chip->card_data[blockAddr * 16], chip->fifo, 16);
+            uint8_t crc[2];
+            calc_crc_a(chip->fifo, 16, crc);
+            chip->fifo[16] = crc[0];
+            chip->fifo[17] = crc[1];
+            chip->fifo_len = 18;
+            update_fifo_level_register(chip);
+            set_specific_irq_flag(chip, 0x04); // RxIRq
+            printf("Block %d data plus CRC is in FIFO.\n", blockAddr);
+            if (blockAddr == 0) {
+                // После записи блока 0 обновить UID
+                memcpy(chip->uid, &chip->card_data[0], 4);
+                printf("UID updated from block 0: %02X %02X %02X %02X\n",
+                    chip->uid[0], chip->uid[1], chip->uid[2], chip->uid[3]);
+            }
+          } else {
+            printf("WRITE failed: block address %d is out of bounds.\n", blockAddr);
+            chip->fifo_len = 0;
+            update_fifo_level_register(chip);
+          }
+        } else {
+          printf("WRITE failed: command too short.\n");
+          chip->fifo_len = 0;
+          update_fifo_level_register(chip);
+        }
+      } else {
+        printf("WRITE failed: not authenticated for this sector.\n");
+        chip->fifo_len = 0;
+        update_fifo_level_register(chip);
+      }
+      break;
+
+    case 0x50: // HALT
+      chip->uid_backdoor_step1 = true;
+      chip->fifo_len = 0;
+      set_specific_irq_flag(chip, 0x10); // IdleIRq
+      break;
+    case 0x40:
+      if (chip->uid_backdoor_step1) {
+        chip->fifo[0] = 0x0A;
+        chip->fifo_len = 1;
+        set_specific_irq_flag(chip, 0x04); // RxIRq
+        chip->uid_backdoor_step1 = false;
+        chip->uid_backdoor_open = true; // разрешаем следующий шаг
+      } else {
+        chip->fifo_len = 0;
+      }
+      break;
+    case 0x43:
+      if (chip->uid_backdoor_open) {
+        chip->fifo[0] = 0x0A;
+        chip->fifo_len = 1;
+        set_specific_irq_flag(chip, 0x04); // RxIRq
+        // Теперь разрешить запись в сектор 0
+        chip->uid_backdoor_open = true;
+      } else {
+        chip->fifo_len = 0;
+      }
+      break;
+
+    case CMD_AUTH_A:
+    case CMD_AUTH_B:
+      printf("Handling AUTHENTICATE command\n");
+      // Simplified authentication: we just check the command in FIFO.
+      // A real implementation would check the key against the sector trailer.
+      if (chip->fifo_len >= 1 && (chip->fifo[0] == CMD_AUTH_A || chip->fifo[0] == CMD_AUTH_B)) {
+          printf("Authentication successful (simulated)\n");
+          chip->authenticated = true;
+          // The command completes when IdleIRq is set.
+          set_specific_irq_flag(chip, 0x10); // IdleIRq
+      } else {
+          printf("Authentication failed: incorrect command in FIFO (len=%d)\n", chip->fifo_len);
+          // Maybe set an error flag? For now, do nothing and let it time out.
+      }
+      chip->fifo_len = 0; // Clear FIFO after auth attempt
+      update_fifo_level_register(chip);
+      chip->registers[0x01] = 0; // Go to Idle
+      break;
+
+    case CMD_CT:
+      printf("Handling CT command (Transceive)\n");
+      // This command is typically used for Transmit and Receive.
+      // For self-test, we just acknowledge it.
+      set_specific_irq_flag(chip, 0x20); // TxIRq
+      chip->registers[0x01] = 0; // Go to Idle
+      break;
+
+    case CMD_CALC_CRC:
+      printf("Handling CALC_CRC command\n");
+      perform_crc_calculation(chip);
+      chip->registers[0x01] = 0; // Go to Idle
+      break;
+
+    case CMD_IDLE:
+      printf("Handling IDLE command\n");
+      chip->registers[0x01] = 0; // Go to Idle
+      break;
+
+    case CMD_MEM:
+      printf("Handling MEM command (Transfer FIFO to internal buffer)\n");
+      // This command transfers FIFO data to internal buffer for self-test
+      // In our emulation, we just acknowledge the command
+      set_specific_irq_flag(chip, 0x10); // IdleIRq
+      chip->registers[0x01] = 0; // Go to Idle
+      break;
+
+    case CMD_GEN_RANDOM_ID:
+      printf("Handling GEN_RANDOM_ID command\n");
+      // This command generates a random ID for self-test
+      // In our emulation, we just acknowledge the command
+      set_specific_irq_flag(chip, 0x10); // IdleIRq
+      chip->registers[0x01] = 0; // Go to Idle
+      break;
+
+    case CMD_TRANSMIT:
+      printf("Handling TRANSMIT command\n");
+      // This command transmits data from FIFO for self-test
+      // In our emulation, we just acknowledge the command
+      set_specific_irq_flag(chip, 0x20); // TxIRq
+      chip->registers[0x01] = 0; // Go to Idle
+      break;
+
+    case CMD_RECEIVE:
+      printf("Handling RECEIVE command\n");
+      // This command activates the receiver for self-test
+      // In our emulation, we just acknowledge the command
+      set_specific_irq_flag(chip, 0x10); // IdleIRq
+      chip->registers[0x01] = 0; // Go to Idle
+      break;
+
     default:
       printf("Unknown MIFARE command: 0x%02X\n", cmd);
       break;
@@ -371,13 +591,19 @@ static void read_fifo_data_register(chip_state_t *chip) {
     memcpy(chip->spi_buffer, chip->fifo, bytes_to_read);
     chip->read_count = bytes_to_read;
     
-    chip->fifo_len = 0;
-    update_fifo_level_register(chip);
+    // Удаляем прочитанные байты из FIFO, но не очищаем полностью
+    fifo_remove_bytes(chip, bytes_to_read);
     
-    clear_irq_flag(chip, 0x04); // Сбросить RxIRq (0x04)
-    printf("RxIRq (0x04) cleared because FIFO is being read.\n");
+    // Устанавливаем RxIRq только если в FIFO еще есть данные
+    if (chip->fifo_len > 0) {
+      set_specific_irq_flag(chip, 0x04); // RxIRq
+      printf("RxIRq (0x04) set because FIFO still has %d bytes\n", chip->fifo_len);
+    } else {
+      clear_irq_flag(chip, 0x04); // Сбросить RxIRq (0x04)
+      printf("RxIRq (0x04) cleared because FIFO is now empty\n");
+    }
     
-    printf("FIFO READ complete: buffer prepared with %d bytes, fifo now empty\n", bytes_to_read);
+    printf("FIFO READ complete: buffer prepared with %d bytes, fifo now has %d bytes\n", bytes_to_read, chip->fifo_len);
   } else {
     chip->spi_buffer[0] = 0;
     chip->read_count = 1;
@@ -406,6 +632,11 @@ static void handle_spi_read_command(chip_state_t *chip) {
     chip->spi_buffer[0] = val;
     chip->read_count = 1;
     printf("ErrorReg read: 0x%02X\n", val);
+  } else if (chip->current_address == 0x36) {
+    // Чтение AutoTestReg - важно для self-test
+    chip->spi_buffer[0] = val;
+    chip->read_count = 1;
+    printf("AutoTestReg read: 0x%02X\n", val);
   } else {
     chip->spi_buffer[0] = val;
     chip->read_count = 1;
@@ -472,9 +703,78 @@ static void write_command_register(chip_state_t *chip, uint8_t val) {
   } else if (val == 0x03) {
     // Команда 0x03 - PCD_CalcCRC (Calculate CRC)
     printf("Command 0x03 - PCD_CalcCRC (Calculate CRC)\n");
-    perform_crc_calculation(chip);
+    
+    // Проверяем, включен ли self-test
+    if (chip->registers[0x36] == 0x09) {
+      printf("Self-test mode detected - generating 64 bytes of test data\n");
+      
+      // Генерируем эталонные данные для self-test MFRC522 v2.0
+      const uint8_t self_test_data[64] = {
+        0x00, 0xEB, 0x66, 0xBA, 0x57, 0xBF, 0x23, 0x95,
+        0xD0, 0xE3, 0x0D, 0x3D, 0x27, 0x89, 0x5C, 0xDE,
+        0x9D, 0x3B, 0xA7, 0x00, 0x21, 0x5B, 0x89, 0x82,
+        0x51, 0x3A, 0xEB, 0x02, 0x0C, 0xA5, 0x00, 0x49,
+        0x7C, 0x84, 0x4D, 0xB3, 0xCC, 0xD2, 0x1B, 0x81,
+        0x5D, 0x48, 0x76, 0xD5, 0x71, 0x61, 0x21, 0xA9,
+        0x86, 0x96, 0x83, 0x38, 0xCF, 0x9D, 0x5B, 0x6D,
+        0xDC, 0x15, 0xBA, 0x3E, 0x7D, 0x95, 0x3B, 0x2F
+      };
+      
+      // Очищаем FIFO и заполняем тестовыми данными
+      chip->fifo_len = 0;
+      memcpy(chip->fifo, self_test_data, 64);
+      chip->fifo_len = 64;
+      update_fifo_level_register(chip);
+      
+      printf("Self-test data generated: 64 bytes in FIFO\n");
+    } else {
+      // Обычный CRC расчет
+      perform_crc_calculation(chip);
+    }
     // В реальном чипе после завершения CRC пользователь обычно устанавливает Idle, 
     // но мы оставим в CommandReg текущее значение (0x03) — библиотека потом сбросит.
+  } else if (val == 0x0E) { // PCD_MFAuthent
+    printf("Command 0x0E - PCD_MFAuthent (MIFARE Authenticate)\n");
+    // Simplified authentication: we just check the command in FIFO.
+    // A real implementation would check the key against the sector trailer.
+    if (chip->fifo_len >= 1 && (chip->fifo[0] == CMD_AUTH_A || chip->fifo[0] == CMD_AUTH_B)) {
+        printf("Authentication successful (simulated)\n");
+        chip->authenticated = true;
+        // The command completes when IdleIRq is set.
+        set_specific_irq_flag(chip, 0x10); // IdleIRq
+    } else {
+        printf("Authentication failed: incorrect command in FIFO (len=%d)\n", chip->fifo_len);
+        // Maybe set an error flag? For now, do nothing and let it time out.
+    }
+    chip->fifo_len = 0; // Clear FIFO after auth attempt
+    update_fifo_level_register(chip);
+    chip->registers[0x01] = 0; // Go to Idle
+  } else if (val == 0x01) { // PCD_Mem
+    printf("Command 0x01 - PCD_Mem (Transfer FIFO to internal buffer)\n");
+    // This command transfers FIFO data to internal buffer for self-test
+    // In our emulation, we just acknowledge the command
+    set_specific_irq_flag(chip, 0x10); // IdleIRq
+    chip->registers[0x01] = 0; // Go to Idle
+  } else if (val == 0x02) { // PCD_GenerateRandomID
+    printf("Command 0x02 - PCD_GenerateRandomID (Generate random ID)\n");
+    // This command generates a random ID for self-test
+    // In our emulation, we just acknowledge the command
+    set_specific_irq_flag(chip, 0x10); // IdleIRq
+    chip->registers[0x01] = 0; // Go to Idle
+  } else if (val == 0x04) { // PCD_Transmit
+    printf("Command 0x04 - PCD_Transmit (Transmit data from FIFO)\n");
+    // This command transmits data from FIFO for self-test
+    // In our emulation, we just acknowledge the command
+    set_specific_irq_flag(chip, 0x20); // TxIRq
+    chip->registers[0x01] = 0; // Go to Idle
+  } else if (val == 0x08) { // PCD_Receive
+    printf("Command 0x08 - PCD_Receive (Activate receiver)\n");
+    // This command activates the receiver for self-test
+    // In our emulation, we just acknowledge the command
+    set_specific_irq_flag(chip, 0x10); // IdleIRq
+    chip->registers[0x01] = 0; // Go to Idle
+  } else {
+    chip->registers[0x01] = val;
   }
 }
 
@@ -498,6 +798,17 @@ static void handle_spi_write_command(chip_state_t *chip, uint8_t val) {
     printf("Direct write to ComIrqReg: 0x%02X (before: 0x%02X)\n", val, chip->registers[0x04]);
     chip->registers[reg] = val;
     printf("ComIrqReg after write: 0x%02X\n", chip->registers[0x04]);
+  } else if (reg == 0x08) { // Status2Reg
+    printf("Write to Status2Reg: 0x%02X\n", val);
+    // If MFCrypto1On (bit 3) is being cleared, we should exit authenticated state.
+    if ((chip->registers[reg] & 0x08) && !(val & 0x08)) {
+        printf("Exiting authenticated state.\n");
+        chip->authenticated = false;
+    }
+    chip->registers[reg] = val;
+  } else if (reg == 0x36) { // AutoTestReg
+    printf("Write to AutoTestReg: 0x%02X\n", val);
+    chip->registers[reg] = val;
   } else {
     chip->registers[reg] = val;
   }
