@@ -38,6 +38,6 @@ Uid1 брелок - Card UID: 9F D6 B1 BD Card SAK: 08 PICC type: MIFARE 1KB
 - корректный PICC_DumpToSerial()
 - прохождение теста PCD_PerformSelfTest()
 - MIFARE_UnbrickUidSector(false) починка карты, смена uid
-- 
+- эмуляция PCD_Authenticate(), MIFARE_Write
 
 lib/MFRC522 - библиотека MRFC522 с расширенными отладочными сообщениями
