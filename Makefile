@@ -11,7 +11,7 @@ clean:
 	chmod -R 777 build
 
 compile-chip:
-	cp $(SOURCE_DIR)/diagram.json diagram.json
+	# cp $(SOURCE_DIR)/diagram.json diagram.json
 	echo "Prepared to compile chip..."
 	mkdir -p build/chip
 	cp "$(SOURCE_DIR)/$(SOURCE_CHIP_NAME).chip.json" build/$(SOURCE_CHIP_NAME).json
@@ -41,3 +41,9 @@ compile-debug-arduino:
 	arduino-cli compile --fqbn arduino:avr:uno ./build/sketch --library ./lib/MFRC522 --output-dir build
 
 all: clean compile-chip compile-arduino
+
+create-release:
+	mkdir -p build/release
+	cp -R build/${SOURCE_CHIP_NAME}.wasm build/release/chip.wasm
+	cp -R build/${SOURCE_CHIP_NAME}.json build/release/chip.json
+	cd build/release && zip chip.zip chip.wasm chip.json

@@ -2,10 +2,10 @@
 
 This is a Wokwi project. Please edit this README file and add a description of your project.
 
-P/s по неизвестным причинам не работают некоторые функции в вебверсии wokwi. Поэтом просто установите wokwi дополнение в VS Code https://marketplace.visualstudio.com/items?itemName=wokwi.wokwi-vscode
 
 # Wokwi demo projects
-- https://wokwi.com/projects/432456562791073793
+- https://wokwi.com/projects/432456562791073793 - test all function MRFC522
+- https://wokwi.com/projects/436744920653539329 - multi rfid reader
 
 
 ## Usage
