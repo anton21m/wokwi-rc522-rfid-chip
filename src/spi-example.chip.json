@@ -18,5 +18,15 @@
     "",
     "",
     ""
+  ],
+  "controls": [
+    {
+      "id": "selectedCard",
+      "label": "Select Card \n (0 - card not selected, 1-5 - card UID index)",
+      "type": "range",
+      "min": 0,
+      "max": 5,
+      "step": 1
+    }
   ]
 }

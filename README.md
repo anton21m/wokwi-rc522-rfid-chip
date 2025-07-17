@@ -32,6 +32,7 @@ Uid1 брелок - Card UID: 9F D6 B1 BD Card SAK: 08 PICC type: MIFARE 1KB
 
 
 # симуляция
+- Возможность выбора из 5 UID различных карт
 - Firmware Version: 0x92 = v2.0
 - распознавание карты как MIFARE 1KB
 - выдача uid, sak

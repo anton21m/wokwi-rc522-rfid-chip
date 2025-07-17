@@ -40,6 +40,15 @@
 #define CMD_TRANSFER      0xB0 // MIFARE Transfer
 #define CMD_UL_WRITE      0xA2 // MIFARE Ultralight Write
 
+// Pre-defined UIDs for 5 different cards
+static const uint8_t CARD_UIDS[5][4] = {
+    {0x50, 0x9D, 0x39, 0x23}, // UId1
+    {0x77, 0x18, 0x40, 0x05}, // Uid2
+    {0x9F, 0xD6, 0xB1, 0xBD}, // Uid3
+    {0x0A, 0x1B, 0x2C, 0x3D}, // Uid4
+    {0xF1, 0xE2, 0xD3, 0xC4}  // Uid5
+};
+
 typedef enum {
   SPI_STATE_IDLE,
   SPI_STATE_WAIT_DATA,
@@ -62,6 +71,10 @@ typedef struct {
   // Emulated card data (MIFARE Classic 1K = 16 sectors * 4 blocks * 16 bytes)
   uint8_t card_data[16 * 4 * 16];
   uint8_t uid[4];
+
+  // NEW: Selected card index and Wokwi attribute ID
+  uint32_t selected_card_attr_id;
+  uint8_t selected_card_index; // 0 = no card, 1-5 = CARD_UIDS index + 1
 
   // New internal data register for MIFARE Value Block operations (Restore/Transfer)
   uint8_t internal_data_register[16];
@@ -125,7 +138,8 @@ static void reset_chip_state(chip_state_t *chip);
 static void set_irq_flag(chip_state_t *chip);
 static void clear_irq_flag(chip_state_t *chip, uint8_t flag);
 static void set_specific_irq_flag(chip_state_t *chip, uint8_t flag);
-static void log_chip_state(chip_state_t *chip, const char *context);
+static void log_chip_state(chip_state_t *chip);
+void send_ack_response(chip_state_t *chip);
 
 // CRC_A для ISO14443A (полином 0x8408, начальное значение 0x6363)
 static void calc_crc_a(const uint8_t *data, size_t len, uint8_t *crc) {
@@ -192,14 +206,20 @@ void chip_init(void) {
   chip_state_t *chip = calloc(1, sizeof(chip_state_t));
   chip->cs_pin = pin_init("CS", INPUT_PULLUP);
 
+  // Initialize Wokwi control for card selection
+  chip->selected_card_attr_id = attr_init("selectedCard", 0); // Default to 0 (no card)
+  chip->selected_card_index = attr_read(chip->selected_card_attr_id);
+
+  // Initialize UID (will be updated when card is selected)
+  if (chip->selected_card_index > 0 && chip->selected_card_index <= 5) {
+      memcpy(chip->uid, CARD_UIDS[chip->selected_card_index - 1], 4);
+  } else {
+      // Default UID if no card selected or invalid index
+      memset(chip->uid, 0, 4);
+  }
+
   // Initialize registers, set version reg to typical MFRC522 version
   chip->registers[VERSION_REG] = 0x92;
-
-  // Example UID (выбрали 50 92 9D 39, чтобы BCC был 0x66)
-  chip->uid[0] = 0x50;
-  chip->uid[1] = 0x92;
-  chip->uid[2] = 0x9D;
-  chip->uid[3] = 0x39;
 
   printf("INIT, UID %02X %02X %02X %02X\n",
     chip->uid[0], chip->uid[1], chip->uid[2], chip->uid[3]);
@@ -306,19 +326,106 @@ void chip_pin_change(void *user_data, pin_t pin, uint32_t value) {
   }
 }
 
+void chip_spi_done(void *user_data, uint8_t *buffer, uint32_t count) {
+  chip_state_t *chip = (chip_state_t*)user_data;
+
+  // NEW: Read selected card from Wokwi control and update UID if changed
+  uint8_t new_selected_card_index = attr_read(chip->selected_card_attr_id);
+  if (new_selected_card_index != chip->selected_card_index) {
+      chip->selected_card_index = new_selected_card_index;
+      if (chip->selected_card_index > 0 && chip->selected_card_index <= 5) {
+          memcpy(chip->uid, CARD_UIDS[chip->selected_card_index - 1], 4);
+      } else {
+          memset(chip->uid, 0, 4);
+      }
+      printf("Selected card changed to: %d\n", chip->selected_card_index);
+      // Reinitialize card data for new card
+      memset(chip->card_data, 0, sizeof(chip->card_data));
+      chip->card_data[0] = chip->uid[0];
+      chip->card_data[1] = chip->uid[1];
+      chip->card_data[2] = chip->uid[2];
+      chip->card_data[3] = chip->uid[3];
+      chip->card_data[4] = chip->uid[0] ^ chip->uid[1] ^ chip->uid[2] ^ chip->uid[3]; // BCC
+      const uint8_t default_trailer[16] = {
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // Key A
+        0xFF, 0x07, 0x80,                   // Access Bits (default configuration)
+        0x69,                               // User Data Byte (GPB)
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF  // Key B
+      };
+      for (int sector = 0; sector < 16; sector++) {
+        int trailer_block_index = sector * 4 + 3;
+        memcpy(&chip->card_data[trailer_block_index * 16], default_trailer, 16);
+      }
+  }
+
+  if (pin_read(chip->cs_pin) == HIGH) {
+    return; // CS is high, transaction is over.
+  }
+
+  switch (chip->spi_transaction_state) {
+    case SPI_STATE_IDLE: {
+      uint8_t cmd_byte = buffer[0];
+      chip->current_address = (cmd_byte >> 1) & 0x3F;
+      chip->is_read = (cmd_byte & 0x80) != 0;
+      
+      if (chip->stream_write_to_fifo && (chip->current_address != 0x09 || chip->is_read)) {
+        chip->stream_write_to_fifo = false;
+      }
+
+    // if (chip->current_address == 0x09 || chip->current_address == 0x01) {
+    //       printf("SPI cmd: 0x%02X, addr: 0x%02X, read: %s\n", cmd_byte, chip->current_address, chip->is_read ? "yes" : "no");
+    // }
+
+    if (chip->is_read) {
+      handle_spi_read_command(chip);
+        if (chip->read_count > 0) {
+      spi_start(chip->spi, chip->spi_buffer, chip->read_count);
+        }
+        chip->spi_transaction_state = SPI_STATE_IDLE; // Stay idle, ready for next command
+      } else { // It's a write command
+        if (chip->current_address == 0x09) {
+            chip->stream_write_to_fifo = true;
+        }
+        chip->spi_transaction_state = SPI_STATE_WAIT_DATA;
+        spi_start(chip->spi, chip->spi_buffer, 1); // Wait for the data byte
+      }
+      break;
+    }
+
+    case SPI_STATE_WAIT_DATA: {
+      uint8_t data_byte = buffer[0];
+      handle_spi_write_command(chip, data_byte);
+
+      if (chip->stream_write_to_fifo) {
+        chip->spi_transaction_state = SPI_STATE_WAIT_DATA;
+    spi_start(chip->spi, chip->spi_buffer, 1);
+  } else {
+        chip->spi_transaction_state = SPI_STATE_IDLE;
+      }
+      break;
+    }
+  }
+}
+
 // MIFARE command processing functions
 static void handle_reqa_wupa_command(chip_state_t *chip) {
-  printf("REQA/WUPA - sending ATQA\n");
-  // Заменяем команду REQA на ATQA
-  chip->fifo[0] = 0x04;  // ATQA
-  chip->fifo[1] = 0x00;
-  chip->fifo_len = 2;
-  update_fifo_level_register(chip);
-  // Устанавливаем только RxIRq для успешного приема данных
-  set_specific_irq_flag(chip, 0x20);  // RxIRq (corrected from 0x04)
-  chip->anticoll_step = 0;
-  chip->registers[0x0C] &= ~0x07; // Сброс RxLastBits в 0, так как ATQA - это полные байты
-//   log_chip_state(chip, "after REQA/WUPA");
+  // Only respond if a card is selected (index > 0)
+  if (chip->selected_card_index > 0) {
+      printf("REQA/WUPA - sending ATQA for card %d\n", chip->selected_card_index);
+      // Заменяем команду REQA на ATQA
+      chip->fifo[0] = 0x04;  // ATQA
+      chip->fifo[1] = 0x00;
+      chip->fifo_len = 2;
+      update_fifo_level_register(chip);
+      // Устанавливаем только RxIRq для успешного приема данных
+      set_specific_irq_flag(chip, 0x20);  // RxIRq (corrected from 0x04)
+      chip->anticoll_step = 0;
+      chip->registers[0x0C] &= ~0x07; // Сброс RxLastBits в 0, так как ATQA - это полные байты
+  } else {
+      printf("REQA/WUPA - no card selected, no response\n");
+      chip->fifo_len = 0; // Clear FIFO if no card is selected
+      update_fifo_level_register(chip); // Update FIFO level register
+  }
 }
 
 static void handle_anticoll_command(chip_state_t *chip) {
@@ -333,11 +440,19 @@ static void handle_anticoll_command(chip_state_t *chip) {
 //     printf("\n");
 //   }
   
+  // Only process if a card is selected
+  if (chip->selected_card_index == 0) {
+      printf("ANTICOLL - no card selected, no response\n");
+      chip->fifo_len = 0;
+      update_fifo_level_register(chip);
+      return;
+  }
+
   // Обработка ANTICOLLISION для Cascade Level 1
   if (chip->anticoll_step == 0 && chip->fifo_len >= 1 && chip->fifo[0] == CMD_SEL_CL1) {
     // Очищаем FIFO перед формированием ответа
     chip->fifo_len = 0;
-    printf("ANTICOLL - responding with UID\n");
+    printf("ANTICOLL - responding with UID for card %d\n", chip->selected_card_index);
     chip->fifo[chip->fifo_len++] = chip->uid[0];
     chip->fifo[chip->fifo_len++] = chip->uid[1];
     chip->fifo[chip->fifo_len++] = chip->uid[2];
@@ -367,10 +482,18 @@ static void handle_select_command(chip_state_t *chip) {
 //   }
 //   printf("\n");
 
+  // Only process if a card is selected
+  if (chip->selected_card_index == 0) {
+      printf("SELECT - no card selected, no response\n");
+      chip->fifo_len = 0;
+      update_fifo_level_register(chip);
+      return;
+  }
+
   // Check if this is the correct SELECT command for our UID
   if (chip->fifo[2] == chip->uid[0] && chip->fifo[3] == chip->uid[1] &&
       chip->fifo[4] == chip->uid[2] && chip->fifo[5] == chip->uid[3]) {
-    printf("SELECT - UID match, sending SAK\n");
+    printf("SELECT - UID match for card %d, sending SAK\n", chip->selected_card_index);
 
     // Clear FIFO before sending SAK
       chip->fifo_len = 0;
@@ -392,7 +515,7 @@ static void handle_select_command(chip_state_t *chip) {
     chip->registers[0x0C] &= ~0x07; // Сброс RxLastBits в 0, так как SAK - это полный байт
 //     printf("SELECT completed - SAK+CRC sent: %02X %02X %02X\n", chip->fifo[0], chip->fifo[1], chip->fifo[2]);
     } else {
-    printf("SELECT failed - UID mismatch\n");
+    printf("SELECT failed - UID mismatch for card %d\n", chip->selected_card_index);
     printf("Expected UID: %02X %02X %02X %02X\n",
            chip->uid[0], chip->uid[1], chip->uid[2], chip->uid[3]);
     printf("Received UID: %02X %02X %02X %02X\n",
@@ -425,13 +548,7 @@ void process_mifare_command(chip_state_t *chip) {
       }
       
       // Отправляем 4-битный ACK
-      chip->fifo_len = 0; // Clear FIFO before putting ACK
-      chip->fifo[0] = 0x0A; // MF_ACK
-      chip->fifo_len = 1;
-      update_fifo_level_register(chip);
-      set_specific_irq_flag(chip, 0x20); // RxIRq
-      chip->registers[0x0C] = (chip->registers[0x0C] & ~0x07) | 0x04; // Set RxLastBits to 4
-      printf("Sent ACK (0x0A) for WRITE Phase 2. RxLastBits set to 4. FIFO len: %d\n", chip->fifo_len);
+      send_ack_response(chip);
     } else {
       printf("WRITE Phase 2 failed: not authenticated for this sector.\n");
       // Отправляем NACK или ничего не отправляем, позволяя таймауту произойти
@@ -475,25 +592,19 @@ void process_mifare_command(chip_state_t *chip) {
                   printf("MIFARE INCREMENT executed on block 0x%02X with delta %d. New value: %d\n", blockAddr, delta, currentValue);
                   break;
               }
-              case CMD_RESTORE:
+              case CMD_RESTORE:\
                   // For RESTORE, the action (copying to internal_data_register) happens in Phase 1.
                   // This Phase 2 just needs to send ACK.
                   printf("MIFARE RESTORE Phase 2 (data) received, data ignored. Command for block 0x%02X\n", blockAddr);
                   break;
-              case CMD_TRANSFER:
+              case CMD_TRANSFER:\
                   // For TRANSFER, the action (copying from internal_data_register to block) happens in Phase 1.
                   // This Phase 2 just needs to send ACK.
                   printf("MIFARE TRANSFER Phase 2 (data) received, data ignored. Command for block 0x%02X\n", blockAddr);
                   break;
           }
           // Send 4-bit ACK
-          chip->fifo_len = 0;
-          chip->fifo[0] = 0x0A;
-          chip->fifo_len = 1;
-          update_fifo_level_register(chip);
-          set_specific_irq_flag(chip, 0x20); // RxIRq
-          chip->registers[0x0C] = (chip->registers[0x0C] & ~0x07) | 0x04; // Set RxLastBits to 4
-          printf("Sent ACK (0x0A) for two-step command Phase 2 (cmd 0x%02X, block 0x%02X). FIFO len: %d\n", command, blockAddr, chip->fifo_len);
+          send_ack_response(chip);
       } else {
           printf("Two-step command (0x%02X) Phase 2 failed: not authenticated for block 0x%02X.\n", command, blockAddr);
           chip->fifo_len = 0;
@@ -583,13 +694,7 @@ void process_mifare_command(chip_state_t *chip) {
           chip->pending_write_len = 16;
 
           // Send 4-bit ACK
-          chip->fifo_len = 0; // Clear FIFO before putting ACK
-          chip->fifo[0] = 0x0A; // MF_ACK
-          chip->fifo_len = 1;
-          update_fifo_level_register(chip);
-          set_specific_irq_flag(chip, 0x20); // RxIRq
-          chip->registers[0x0C] = (chip->registers[0x0C] & ~0x07) | 0x04; // Set RxLastBits to 4
-          printf("Sent ACK (0x0A) for WRITE Phase 1. RxLastBits set to 4. FIFO len: %d\n", chip->fifo_len);
+          send_ack_response(chip);
         } else {
           printf("WRITE failed: command too short for phase 1.\n");
           chip->fifo_len = 0;
@@ -637,13 +742,7 @@ void process_mifare_command(chip_state_t *chip) {
               }
 
               // Send 4-bit ACK for the first phase
-              chip->fifo_len = 0;
-              chip->fifo[0] = 0x0A;
-              chip->fifo_len = 1;
-              update_fifo_level_register(chip);
-              set_specific_irq_flag(chip, 0x20); // RxIRq
-              chip->registers[0x0C] = (chip->registers[0x0C] & ~0x07) | 0x04; // Set RxLastBits to 4
-              printf("Sent ACK (0x0A) for two-step command Phase 1 (cmd 0x%02X, block 0x%02X). FIFO len: %d\n", cmd, blockAddr, chip->fifo_len);
+              send_ack_response(chip);
           } else {
               printf("Two-step command (0x%02X) failed: block address out of bounds.\n", cmd);
               chip->fifo_len = 0;
@@ -666,12 +765,8 @@ void process_mifare_command(chip_state_t *chip) {
         // The lib tests write to page 4.
         if (pageAddr >= 2 && pageAddr < 16) {
           memcpy(&chip->card_data[pageAddr * 16], &chip->fifo[2], 4); // Copy only 4 bytes
-          chip->fifo_len = 0; // Clear FIFO
-          chip->fifo[0] = 0x0A; // MF_ACK
-          chip->fifo_len = 1;
-          update_fifo_level_register(chip);
-          set_specific_irq_flag(chip, 0x20); // RxIRq
-          chip->registers[0x0C] = (chip->registers[0x0C] & ~0x07) | 0x04; // Set RxLastBits to 4
+          // Отправляем 4-битный ACK
+          send_ack_response(chip);
         } else {
           printf("MIFARE ULTRALIGHT WRITE failed: page address %d out of bounds or read-only.\n", pageAddr);
           chip->fifo_len = 0;
@@ -693,10 +788,7 @@ void process_mifare_command(chip_state_t *chip) {
       break;
     case 0x40:
       if (chip->uid_backdoor_step1) {
-        chip->fifo[0] = 0x0A;
-        chip->fifo_len = 1;
-        set_specific_irq_flag(chip, 0x20); // RxIRq
-        chip->registers[0x0C] = (chip->registers[0x0C] & ~0x07) | 0x04; // Set RxLastBits to 4
+        send_ack_response(chip);
         chip->uid_backdoor_step1 = false;
         chip->uid_backdoor_open = true; // разрешаем следующий шаг
       } else {
@@ -705,10 +797,7 @@ void process_mifare_command(chip_state_t *chip) {
       break;
     case 0x43:
       if (chip->uid_backdoor_open) {
-        chip->fifo[0] = 0x0A;
-        chip->fifo_len = 1;
-        set_specific_irq_flag(chip, 0x20); // RxIRq
-        chip->registers[0x0C] = (chip->registers[0x0C] & ~0x07) | 0x04; // Set RxLastBits to 4
+        send_ack_response(chip);
         // Теперь разрешить запись в сектор 0
         chip->uid_backdoor_open = true;
       } else {
@@ -1158,8 +1247,8 @@ static void set_specific_irq_flag(chip_state_t *chip, uint8_t flag) {
 //   printf("After setting flag 0x%02X - ComIrqReg: 0x%02X\n", flag, chip->registers[0x04]);
 }
 
-static void log_chip_state(chip_state_t *chip, const char *context) {
-//   printf("=== CHIP STATE [%s] ===\n", context);
+static void log_chip_state(chip_state_t *chip) {
+//   printf("=== CHIP STATE ===\n");
 //   printf("ComIrqReg: 0x%02X, FIFOLevel: %d, ControlReg: 0x%02X\n", 
 //          chip->registers[0x04], chip->registers[0x0A], chip->registers[0x0C]);
 //   printf("FIFO content: ");
@@ -1173,54 +1262,18 @@ static void log_chip_state(chip_state_t *chip, const char *context) {
 //   printf("====================\n");
 }
 
-void chip_spi_done(void *user_data, uint8_t *buffer, uint32_t count) {
-  chip_state_t *chip = (chip_state_t *)user_data;
-
-  if (pin_read(chip->cs_pin) == HIGH) {
-    return; // CS is high, transaction is over.
-  }
-
-  switch (chip->spi_transaction_state) {
-    case SPI_STATE_IDLE: {
-      uint8_t cmd_byte = buffer[0];
-      chip->current_address = (cmd_byte >> 1) & 0x3F;
-      chip->is_read = (cmd_byte & 0x80) != 0;
-      
-      if (chip->stream_write_to_fifo && (chip->current_address != 0x09 || chip->is_read)) {
-        chip->stream_write_to_fifo = false;
-      }
-
-    // if (chip->current_address == 0x09 || chip->current_address == 0x01) {
-    //       printf("SPI cmd: 0x%02X, addr: 0x%02X, read: %s\n", cmd_byte, chip->current_address, chip->is_read ? "yes" : "no");
-    // }
-
-    if (chip->is_read) {
-      handle_spi_read_command(chip);
-        if (chip->read_count > 0) {
-      spi_start(chip->spi, chip->spi_buffer, chip->read_count);
-        }
-        chip->spi_transaction_state = SPI_STATE_IDLE; // Stay idle, ready for next command
-      } else { // It's a write command
-        if (chip->current_address == 0x09) {
-            chip->stream_write_to_fifo = true;
-        }
-        chip->spi_transaction_state = SPI_STATE_WAIT_DATA;
-        spi_start(chip->spi, chip->spi_buffer, 1); // Wait for the data byte
-      }
-      break;
-    }
-
-    case SPI_STATE_WAIT_DATA: {
-      uint8_t data_byte = buffer[0];
-      handle_spi_write_command(chip, data_byte);
-
-      if (chip->stream_write_to_fifo) {
-        chip->spi_transaction_state = SPI_STATE_WAIT_DATA;
-    spi_start(chip->spi, chip->spi_buffer, 1);
-  } else {
-        chip->spi_transaction_state = SPI_STATE_IDLE;
-      }
-      break;
-    }
-  }
+void send_ack_response(chip_state_t *chip) {
+    chip->fifo_len = 0;
+    chip->fifo[0] = 0x0A;
+    chip->fifo_len = 1;
+    update_fifo_level_register(chip);
+    set_specific_irq_flag(chip, 0x20); // RxIRq
+    chip->registers[0x0C] = (chip->registers[0x0C] & ~0x07) | 0x04; // Set RxLastBits to 4
+//    printf("Sent ACK (0x0A). FIFO len: %d\n", chip->fifo_len);
 }
+
+// Global chip state
+static chip_state_t g_chip_state;
+
+void chip_pin_change(void *user_data, pin_t pin, uint32_t value);
+void chip_spi_done(void *user_data, uint8_t *buffer, uint32_t count);

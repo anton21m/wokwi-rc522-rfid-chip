@@ -222,9 +222,8 @@ void test_PICC_ReadCardSerial() {
 
 // Выбор карты по UID
 void test_PICC_Select() {
-  byte oldSak = mfrc522.uid.sak;
   byte result = mfrc522.PICC_Select(&(mfrc522.uid));
-  printTestResult("PICC_Select", result != 0 || mfrc522.uid.sak != oldSak);
+  printTestResult("PICC_Select", result == 0); // теперь OK если STATUS_OK
 }
 
 // Перевести карту в состояние HALT
@@ -353,6 +352,14 @@ void setup() {
     ; // Ждём подключения Serial
   }
 
+}
+
+void loop() {
+  test_all();
+  delay(10000);
+}
+
+void test_all() {
   Serial.println("Тест MFRC522: старт");
 
   SPI.begin();
@@ -412,8 +419,4 @@ void setup() {
   test_PCD_CommunicateWithPICC();
 
   Serial.println("Тест MFRC522: завершён");
-}
-
-void loop() {
-  // Пусто, все тесты в setup()
 }

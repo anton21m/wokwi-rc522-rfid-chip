@@ -1,18 +1,19 @@
 {
   "version": 1,
-  "author": "Uri Shaked",
+  "author": "Anton Shumeuko",
   "editor": "wokwi",
   "parts": [
     { "type": "wokwi-arduino-uno", "id": "uno", "top": 10.2, "left": 37.8, "attrs": {} },
-    { "type": "chip-spi-example", "id": "chip1", "top": -75.78, "left": 196.8, "attrs": {} }
+    { "type": "chip-spi-example", "id": "chip1", "top": -142.98, "left": 273.6, "attrs": {} }
   ],
   "connections": [
-    [ "chip1:GND", "uno:GND.2", "black", [ "v0", "h49.81", "v259.2", "h-124.8" ] ],
-    [ "chip1:VCC", "uno:5V", "red", [ "h59.41", "v278.4", "h-134.4" ] ],
+    [ "chip1:GND", "uno:GND.2", "black", [ "h115.2", "v384", "h-186.3" ] ],
     [ "chip1:SCK", "uno:13", "gold", [ "h0" ] ],
-    [ "chip1:RST", "uno:9", "green", [ "h-144", "v0", "v28.2" ] ],
+    [ "chip1:RST", "uno:9", "green", [ "h-76.8", "v96" ] ],
     [ "chip1:CS", "uno:10", "orange", [ "h0" ] ],
     [ "uno:12", "chip1:MISO", "blue", [ "v0" ] ],
-    [ "chip1:MOSI", "uno:11", "violet", [ "h0" ] ]
-  ]
+    [ "chip1:MOSI", "uno:11", "violet", [ "h0" ] ],
+    [ "chip1:VCC", "uno:3.3V", "red", [ "h124.8", "v374.4", "h-211.2" ] ]
+  ],
+  "dependencies": {}
 }

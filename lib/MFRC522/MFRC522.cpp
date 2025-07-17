@@ -479,6 +479,10 @@ MFRC522::StatusCode MFRC522::PCD_CommunicateWithPICC(	byte command,		///< The co
 	Serial.print(F("sendLen: ")); Serial.println(sendLen);
 	Serial.print(F("waitIRq: 0x")); Serial.println(waitIRq, HEX);
 	
+	Serial.print(F("Data sent: "));
+	for (int i = 0; i < sendLen; i++) Serial.print(sendData[i], HEX), Serial.print(" ");
+	Serial.println();
+	
 	// Prepare values for BitFramingReg
 	byte txLastBits = validBits ? *validBits : 0;
 	byte bitFraming = (rxAlign << 4) + txLastBits;		// RxAlign = BitFramingReg[6..4]. TxLastBits = BitFramingReg[2..0]
@@ -2086,9 +2090,7 @@ bool MFRC522::PICC_ReadCardSerial() {
 		Serial.println(F("PICC_ReadCardSerial SUCCESS"));
 		Serial.print(F("UID size: ")); Serial.println(uid.size);
 		Serial.print(F("UID bytes: "));
-		for (int i = 0; i < uid.size; i++) {
-			Serial.print(uid.uidByte[i], HEX); Serial.print(" ");
-		}
+		for (int i = 0; i < uid.size; i++) Serial.print(uid.uidByte[i], HEX), Serial.print(" ");
 		Serial.println();
 		Serial.print(F("SAK: 0x")); Serial.println(uid.sak, HEX);
 	} else {
