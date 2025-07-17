@@ -1,6 +1,6 @@
 {
   "name": "RC522 RFID Reader",
-  "author": "Uri Shaked",
+  "author": "Anton Shumeyko",
   "pins": [
     "CS",
     "SCK",

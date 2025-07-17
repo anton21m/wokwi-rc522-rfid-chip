@@ -2,9 +2,8 @@
 # SPDX-License-Identifier: MIT
 
 SOURCE_DIR := src
-SOURCE_CHIP_NAME := spi-example
-SOURCE_PROJECT := $(SOURCE_DIR)/spi-chip-example.ino
-
+SOURCE_CHIP_NAME := rfid-rc522
+SOURCE_PROJECT := $(SOURCE_DIR)/mrfc-chip-example.ino
 clean:
 	echo "Cleaning up..."
 	rm -rf build
