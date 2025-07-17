@@ -2,10 +2,18 @@
 
 This is a Wokwi project. Please edit this README file and add a description of your project.
 
-P/s по неизвестным причинам не работают некоторые функции в вебверсии wokwi. Поэтом просто установите wokwi дополнение в VS Code https://marketplace.visualstudio.com/items?itemName=wokwi.wokwi-vscode
 
 # Wokwi demo projects
-- https://wokwi.com/projects/432456562791073793
+- https://wokwi.com/projects/432456562791073793 - test all function MRFC522
+- https://wokwi.com/projects/436744920653539329 - multi rfid reader
+- https://wokwi.com/projects/436746939600791553 - export chip
+
+
+If you want to say thank you, you can buy me a tea or coffee by sending a small donation:
+https://www.patreon.com/c/anton21m/membership  
+https://boosty.to/anton21m
+
+Greetings from Uzbekistan, Tashkent!
 
 
 ## Usage
@@ -22,31 +30,31 @@ wokwi-cli --version
 export WOKWI_CLI_TOKEN=wok_*****
 ```
 
-# fast start
-1. Экспортировать готовый проект в папку src как есть
-2. отредактировать названия в makefile и wokwi.toml
-3. Вывод custom чипов в vscode отображается на вкладке `Output -> Wokwi chips`
+# Fast Start
+1. Export the ready project to the `src` folder as is.
+2. Edit the names in the Makefile and wokwi.toml.
+3. Output of custom chips in VSCode is displayed in the tab `Output -> Wokwi chips`.
 
 
-# выполненные этыпы симуляции
-- Возможность выбора из 5 UID различных карт
+# Completed simulation steps
+- Ability to select from 5 different card UIDs
 - Firmware Version: 0x92 = v2.0
-- распознавание карты как MIFARE 1KB
-- выдача uid, sak
-- корректный PICC_DumpToSerial()
-- прохождение теста PCD_PerformSelfTest()
-- MIFARE_UnbrickUidSector(false) починка карты, смена uid
-- эмуляция PCD_Authenticate(), MIFARE_Write
+- Card recognized as MIFARE 1KB
+- Output of UID, SAK
+- Correct PICC_DumpToSerial()
+- Passing the PCD_PerformSelfTest() test
+- MIFARE_UnbrickUidSector(false): card repair, UID change
+- Emulation of PCD_Authenticate(), MIFARE_Write
 
-lib/MFRC522 - оригинальная библиотека MRFC522 с расширенными отладочными сообщениями
-для сборки с ней измените в makefile на all: clean compile-chip compile-debug-arduino
+lib/MFRC522 - the original MRFC522 library with extended debug messages.
+To build with it, change the Makefile target to: all: clean compile-chip compile-debug-arduino
 
 ```
 arduino-cli compile --fqbn arduino:avr:uno mrfc-chip-example.ino --output-dir build
 ```
 
 
-# Прохождение теста библиотеки MRFC522
+# Passing the MRFC522 Library Test
 
 ```
 Тест MFRC522: старт
