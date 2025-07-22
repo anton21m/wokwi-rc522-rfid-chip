@@ -209,9 +209,10 @@ void test_PICC_WakeupA() {
 }
 
 // Проверка наличия новой карты
-void test_PICC_IsNewCardPresent() {
+bool test_PICC_IsNewCardPresent() {
   bool present = mfrc522.PICC_IsNewCardPresent();
   printTestResult("PICC_IsNewCardPresent", present);
+  return present;
 }
 
 // Чтение серийного номера карты
@@ -383,15 +384,16 @@ void test_all() {
   test_PCD_SoftPowerDown();
   test_PCD_SoftPowerUp();
 
+  // Тесты PICC и MIFARE функций
   // Ожидание карты
-  while (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) {
-    delay(100);
+  while (!test_PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) {
+    Serial.println("Card not present or card old. Change uid");
+    delay(1000);
   }
 
   // Тесты PICC и MIFARE функций
   test_PICC_RequestA();
   test_PICC_WakeupA();
-  test_PICC_IsNewCardPresent();
   test_PICC_ReadCardSerial();
   test_PICC_Select();
   test_PICC_HaltA();

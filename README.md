@@ -49,6 +49,9 @@ export WOKWI_CLI_TOKEN=wok_*****
 lib/MFRC522 - the original MRFC522 library with extended debug messages.
 To build with it, change the Makefile target to: all: clean compile-chip compile-debug-arduino
 
+ChangeLog: 
+22.07.2025 Fix Change simulation PICC_IsNewCardPresent. Second Call is will "FAIL" (real chip)
+
 ```
 arduino-cli compile --fqbn arduino:avr:uno mrfc-chip-example.ino --output-dir build
 ```

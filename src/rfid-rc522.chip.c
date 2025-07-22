@@ -83,6 +83,9 @@ typedef struct {
   bool card_selected;
   bool authenticated;
 
+  // Флаг: карта уже была обнаружена (для IsNewCardPresent)
+  bool card_was_present;
+
   // Internal variables for anticollision, auth, etc.
   uint8_t anticoll_step;
   bool uid_read_completed;
@@ -296,7 +299,8 @@ void chip_init(void) {
   chip->pending_write_len = 0;
   chip->pending_mifare_twostep_command = -1; // NEW
   chip->pending_mifare_twostep_block_addr = 0; // NEW
-
+  chip->card_was_present = false; // Инициализируем флаг
+  
   // Initialize internal data register to all zeros
   memset(chip->internal_data_register, 0, sizeof(chip->internal_data_register));
   
@@ -335,8 +339,10 @@ void chip_spi_done(void *user_data, uint8_t *buffer, uint32_t count) {
       chip->selected_card_index = new_selected_card_index;
       if (chip->selected_card_index > 0 && chip->selected_card_index <= 5) {
           memcpy(chip->uid, CARD_UIDS[chip->selected_card_index - 1], 4);
+          chip->card_was_present = false; // Карта убрана или новая — сбросить флаг
       } else {
           memset(chip->uid, 0, 4);
+          chip->card_was_present = false; // Карта убрана — сбросить флаг
       }
       printf("Selected card changed to: %d\n", chip->selected_card_index);
       // Reinitialize card data for new card
@@ -411,18 +417,22 @@ void chip_spi_done(void *user_data, uint8_t *buffer, uint32_t count) {
 static void handle_reqa_wupa_command(chip_state_t *chip) {
   // Only respond if a card is selected (index > 0)
   if (chip->selected_card_index > 0) {
-      printf("REQA/WUPA - sending ATQA for card %d\n", chip->selected_card_index);
-      // Заменяем команду REQA на ATQA
-      chip->fifo[0] = 0x04;  // ATQA
-      chip->fifo[1] = 0x00;
-      chip->fifo_len = 2;
-      update_fifo_level_register(chip);
-      // Устанавливаем только RxIRq для успешного приема данных
+      if (!chip->card_was_present) {
+          chip->fifo[0] = 0x04;  // ATQA
+          chip->fifo[1] = 0x00;
+          chip->fifo_len = 2;
+          update_fifo_level_register(chip);
+          // Устанавливаем только RxIRq для успешного приема данных
       set_specific_irq_flag(chip, 0x20);  // RxIRq (corrected from 0x04)
-      chip->anticoll_step = 0;
-      chip->registers[0x0C] &= ~0x07; // Сброс RxLastBits в 0, так как ATQA - это полные байты
+          chip->anticoll_step = 0;
+          chip->registers[0x0C] &= ~0x07; // Сброс RxLastBits в 0, так как ATQA - это полные байты
+          chip->card_was_present = true; // Установить флаг: карта обнаружена
+      } else {
+          // Карта уже была обнаружена, не отвечаем повторно
+          chip->fifo_len = 0;
+          update_fifo_level_register(chip);
+      }
   } else {
-      printf("REQA/WUPA - no card selected, no response\n");
       chip->fifo_len = 0; // Clear FIFO if no card is selected
       update_fifo_level_register(chip); // Update FIFO level register
   }
